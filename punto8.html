@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+        font-family: sans-serif;
+        margin: 20px;
+        background-color: #f0f4f8;
+        color: #334155;
+    }
+    .container {
+        max-width: 1000px;
+        margin: 2rem auto;
+        padding: 1.5rem;
+        background-color: #ffffff;
+        border-radius: 0.75rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    h1, h2 {
+        color: #f97316; /* Orange-500 */
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    p {
+        margin-bottom: 1rem;
+    }
+    .input-group {
+        margin-bottom: 15px;
+    }
+    .input-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+    .input-group input[type="number"] {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box; /* Incluye padding y borde en el ancho total */
+    }
+    button {
+        padding: 10px 15px;
+        background-color: #f97316; /* Orange-500 */
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.2s ease;
+        margin-bottom: 10px;
+    }
+    button:hover {
+        background-color: #ea580c; /* Orange-600 */
+    }
+    button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+    .div-con-scroll {
+        height: 300px; /* Altura fija para la tabla de datos */
+        overflow-y: auto; /* Muestra scroll solo cuando es necesario */
+        border: 1px solid #e2e8f0;
+        padding: 10px;
+        background-color: #f8fafc;
+        border-radius: 0.5rem;
+    }
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9em;
+    }
+    .data-table th, .data-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px;
+        text-align: left;
+    }
+    .data-table th {
+        background-color: #e2e8f0;
+        font-weight: bold;
+    }
+    #avance {
+        width: 100%;
+        height: 20px;
+        margin-top: 10px;
+    }
+    #predictionOutput {
+        border: 1px solid #ccc;
+        padding: 15px;
+        min-height: 120px;
+        white-space: pre-wrap;
+        background-color: #f9f9f9;
+        border-radius: 0.5rem;
+        margin-top: 20px;
+    }
+    .section {
+        margin-bottom: 25px;
+    }
+  </style>
+  <title>Iris TF</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.13.0"> </script>
+  <script>
+    // Forzar el uso del backend de CPU desde el principio
+    // Esto es crucial para evitar problemas de compatibilidad con WebGL en algunos dispositivos.
+    tf.setBackend('cpu').then(() => {
+        console.log("TensorFlow.js backend establecido a:", tf.getBackend());
+    }).catch(err => {
+        console.error("Error al establecer el backend de TensorFlow.js:", err);
+        document.getElementById('predictionOutput').innerText = "Error: No se pudo inicializar el backend de TensorFlow.js. Revisa la consola.";
+    });
+  </script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Clasificación de Flor Iris con TensorFlow.js</h1>
+        <p>Este modelo de red neuronal clasifica las flores Iris en una de tres especies (Setosa, Versicolor, Virginica) basándose en sus cuatro características.</p>
+
+        <div class="section">
+            <h2>Datos de la flor IRIS</h2>
+            <div class="div-con-scroll">
+                <table id="irisDataTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Índice</th>
+                            <th>Long. Sépalo (cm)</th>
+                            <th>Ancho Sépalo (cm)</th>
+                            <th>Long. Pétalo (cm)</th>
+                            <th>Ancho Pétalo (cm)</th>
+                            <th>Especie Real</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Entrenamiento del Modelo</h2>
+            <p id="avance">Cargando datos...</p>
+            <progress id="progressBar" max="100" value="0"></progress><br>
+            <div class="input-group">
+                <label for="epochsInput">Número de Épocas:</label>
+                <input type="number" id="epochsInput" value="100" min="10">
+            </div>
+            <button id="trainButton">Entrenar Modelo</button>
+            <p id="accuracyOutput"></p>
+        </div>
+
+        <div class="section">
+            <h2>Realizar Predicción por Índice</h2>
+            <div class="input-group">
+                <label for="predictIndexInput">Ingrese el índice del dato a predecir (0-149):</label>
+                <input type="number" id="predictIndexInput" value="0" min="0" max="149">
+            </div>
+            <button id="predictByIndexButton" disabled>Predecir</button>
+        </div>
+
+        <div class="section">
+            <h2>Resultados de Predicción</h2>
+            <div id="predictionOutput">
+                Esperando el entrenamiento del modelo y la selección de un índice...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Clases de la flor Iris
+        const IRIS_CLASSES = ['Iris setosa', 'Iris versicolor', 'Iris virginica'];
+        const IRIS_NUM_CLASSES = IRIS_CLASSES.length;
+
+        // Datos de las observaciones de la flor IRIS (completo con 150 muestras)
+        // Formato: [longitud_sepalo, ancho_sepalo, longitud_petalo, ancho_petalo, clase_numerica]
+        // Clase numérica: 0 = setosa, 1 = versicolor, 2 = virginica
+        const IRIS_DATA = [
+            [5.1,3.5,1.4,0.2,0],[4.9,3,1.4,0.2,0],[4.7,3.2,1.3,0.2,0],
+            [4.6,3.1,1.5,0.2,0],[5,3.6,1.4,0.2,0],[5.4,3.9,1.7,0.4,0],
+            [4.6,3.4,1.4,0.3,0],[5,3.4,1.5,0.2,0],[4.4,2.9,1.4,0.2,0],
+            [4.9,3.1,1.5,0.1,0],[5.4,3.7,1.5,0.2,0],[4.8,3.4,1.6,0.2,0],
+            [4.8,3,1.4,0.1,0],[4.3,3,1.1,0.1,0],[5.8,4,1.2,0.2,0],
+            [5.7,4.4,1.5,0.4,0],[5.4,3.9,1.3,0.4,0],[5.1,3.5,1.4,0.3,0],
+            [5.7,3.8,1.7,0.3,0],[5.1,3.8,1.5,0.3,0],[5.4,3.4,1.7,0.2,0],
+            [5.1,3.7,1.5,0.4,0],[4.6,3.6,1,0.2,0],[5.1,3.3,1.7,0.5,0],
+            [4.8,3.4,1.9,0.2,0],[5,3,1.6,0.2,0],[5,3.4,1.6,0.4,0],
+            [5.2,3.5,1.5,0.2,0],[5.2,3.4,1.4,0.2,0],[4.7,3.2,1.6,0.2,0],
+            [4.8,3.1,1.6,0.2,0],[5.4,3.4,1.5,0.4,0],[5.2,4.1,1.5,0.1,0],
+            [5.5,4.2,1.4,0.2,0],[4.9,3.1,1.5,0.1,0],[5,3.2,1.2,0.2,0],
+            [5.5,3.5,1.3,0.2,0],[4.9,3.6,1.4,0.1,0],[4.4,3,1.3,0.2,0],
+            [5.1,3.4,1.5,0.2,0],[5,3.5,1.3,0.3,0],[4.5,2.3,1.3,0.3,0],
+            [4.4,3.2,1.3,0.2,0],[5,3.5,1.6,0.6,0],[5.1,3.8,1.9,0.4,0],
+            [4.8,3,1.4,0.3,0],[5.1,3.8,1.6,0.2,0],[4.6,3.2,1.4,0.2,0],
+            [5.3,3.7,1.5,0.2,0],[5,3.3,1.4,0.2,0], // 50 setosa
+            [7,3.2,4.7,1.4,1],[6.4,3.2,4.5,1.5,1],[6.9,3.1,4.9,1.5,1],
+            [5.5,2.3,4,1.3,1],[6.5,2.8,4.6,1.5,1],[5.7,2.8,4.5,1.3,1],
+            [6.3,3.3,4.7,1.6,1],[4.9,2.4,3.3,1,1],[6.6,2.9,4.6,1.3,1],
+            [5.2,2.7,3.9,1.4,1],[5,2,3.5,1,1],[5.9,3,4.2,1.5,1],
+            [6,2.2,4,1,1],[6.1,2.9,4.7,1.4,1],[5.6,2.9,3.6,1.3,1],
+            [6.7,3.1,4.4,1.4,1],[5.6,3,4.5,1.5,1],[5.8,2.7,4.1,1,1],
+            [6.2,2.2,4.5,1.5,1],[5.6,2.5,3.9,1.1,1],[5.9,3.2,4.8,1.8,1],
+            [6.1,2.8,4,1.3,1],[6.3,2.5,4.9,1.5,1],[6.1,2.8,4.7,1.2,1],
+            [6.4,2.9,4.3,1.3,1],[6.6,3,4.4,1.4,1],[6.8,2.8,4.8,1.4,1],
+            [6.7,3,5,1.7,1],[6,2.9,4.5,1.5,1],[5.7,2.6,3.5,1,1],
+            [5.5,2.4,3.8,1.1,1],[5.5,2.4,3.7,1,1],[5.8,2.7,3.9,1.2,1],
+            [6,2.7,5.1,1.6,1],[5.4,3,4.5,1.5,1],[6,3.4,4.5,1.6,1],
+            [6.7,3.1,4.7,1.5,1],[6.3,2.3,4.4,1.3,1],[5.6,3,4.1,1.3,1],
+            [5.5,2.5,4,1.3,1],[5.5,2.6,4.4,1.2,1],[6.1,3,4.6,1.4,1],
+            [5.8,2.6,4,1.2,1],[5,2.3,3.3,1,1],[5.6,2.7,4.2,1.3,1],
+            [5.7,3,4.2,1.2,1],[5.7,2.9,4.2,1.3,1],[6.2,2.9,4.3,1.3,1],
+            [5.1,2.5,3,1.1,1],[5.7,2.8,4.1,1.3,1], // 50 versicolor
+            [6.3,3.3,6,2.5,2],[5.8,2.7,5.1,1.9,2],
+            [7.1,3,5.9,2.1,2],[6.3,2.9,5.6,1.8,2],[6.5,3,5.8,2.2,2],
+            [7.6,3,6.6,2.1,2],[4.9,2.5,4.5,1.7,2],[7.3,2.9,6.3,1.8,2],
+            [6.7,2.5,5.8,1.8,2],[7.2,3.6,6.1,2.5,2],[6.5,3.2,5.1,2,2],
+            [6.4,2.7,5.3,1.9,2],[6.8,3,5.5,2.1,2],[5.7,2.5,5,2,2],
+            [5.8,2.8,5.1,2.4,2],[6.4,3.2,5.3,2.3,2],[6.5,3,5.5,1.8,2],
+            [7.7,3.8,6.7,2.2,2],[7.7,2.6,6.9,2.3,2],[6,2.2,5,1.5,2],
+            [6.9,3.2,5.7,2.3,2],[5.6,2.8,4.9,2,2],[7.7,2.8,6.7,2,2],
+            [6.3,2.7,4.9,1.8,2],[6.7,3.3,5.7,2.1,2],[7.2,3.2,6,1.8,2],
+            [6.2,2.8,4.8,1.8,2],[6.1,3,4.9,1.8,2],[6.4,2.8,5.6,2.1,2],
+            [7.2,3,5.8,1.6,2],[7.4,2.8,6.1,1.9,2],[7.9,3.8,6.4,2,2],
+            [6.4,2.8,5.6,2.2,2],[6.3,2.8,5.1,1.5,2],[6.1,2.6,5.6,1.4,2],
+            [7.7,3,6.1,2.3,2],[6.3,3.4,5.6,2.4,2],[6.4,3.1,5.5,1.8,2],
+            [6,3,4.8,1.8,2],[6.9,3.1,5.4,2.1,2],[6.7,3.1,5.6,2.4,2],
+            [6.9,3.1,5.1,2.3,2],[5.8,2.7,5.1,1.9,2],[6.8,3.2,5.9,2.3,2],
+            [6.7,3.3,5.7,2.5,2],[6.7,3,5.2,2.3,2],[6.3,2.5,5,1.9,2],
+            [6.5,3,5.2,2,2],[6.2,3.4,5.4,2.3,2],[5.9,3,5.1,1.8,2] // 50 virginica
+        ];
+
+        // Rango de cada característica para la normalización (calculado del dataset completo)
+        const minMaxValues = {
+            sepalLength: { min: 4.3, max: 7.9 },
+            sepalWidth: { min: 2.0, max: 4.4 },
+            petalLength: { min: 1.0, max: 6.9 },
+            petalWidth: { min: 0.1, max: 2.5 }
+        };
+
+        let model; // Variable global para el modelo de TensorFlow.js
+        let epochs = 100; // Número de épocas por defecto para el entrenamiento
+        let lastEpochAccuracy = "N/A"; // Variable para almacenar la última precisión de época válida
+
+        /**
+         * Normaliza un valor a un rango de 0 a 1.
+         * @param {number} value - El valor a normalizar.
+         * @param {number} min - El valor mínimo del rango original.
+         * @param {number} max - El valor máximo del rango original.
+         * @returns {number} El valor normalizado.
+         */
+        function normalize(value, min, max) {
+            return (value - min) / (max - min);
+        }
+
+        /**
+         * Prepara los datos de entrenamiento normalizados y codificados para TensorFlow.js.
+         * Divide los datos en características (inputs) y etiquetas (outputs),
+         * y codifica las etiquetas de clase en formato one-hot.
+         * @returns {{inputs: tf.Tensor, outputs: tf.Tensor}} Los tensores de entrada y salida.
+         */
+        function getNormalizedTrainingData() {
+            const inputs = IRIS_DATA.map(d => [
+                normalize(d[0], minMaxValues.sepalLength.min, minMaxValues.sepalLength.max),
+                normalize(d[1], minMaxValues.sepalWidth.min, minMaxValues.sepalWidth.max),
+                normalize(d[2], minMaxValues.petalLength.min, minMaxValues.petalLength.max),
+                normalize(d[3], minMaxValues.petalWidth.min, minMaxValues.petalWidth.max)
+            ]);
+            // Codificación one-hot para las clases de salida (0, 1, 2)
+            const outputs = IRIS_DATA.map(d => {
+                const oneHot = [0, 0, 0]; // Array de 3 elementos para 3 clases
+                oneHot[d[4]] = 1; // Pone un 1 en la posición de la clase correcta
+                return oneHot;
+            });
+            return { inputs: tf.tensor2d(inputs), outputs: tf.tensor2d(outputs) };
+        }
+
+        /**
+         * Crea y compila el modelo de red neuronal para la clasificación de Iris.
+         */
+        async function createModel() {
+            console.log("createModel: Iniciando creación y compilación del modelo.");
+            model = tf.sequential();
+            // Capa de entrada: 4 características (longitud/ancho de sépalo/pétalo)
+            model.add(tf.layers.dense({ inputShape: [4], units: 10, activation: 'relu' }));
+            // Capa oculta: 10 neuronas con activación ReLU
+            model.add(tf.layers.dense({ units: 10, activation: 'relu' }));
+            // Capa de salida: 3 neuronas (una para cada clase de Iris) con activación softmax
+            // Softmax convierte las salidas en probabilidades que suman 1.
+            model.add(tf.layers.dense({ units: IRIS_NUM_CLASSES, activation: 'softmax' }));
+
+            // Compilar el modelo:
+            // - optimizer: 'adam' es un optimizador popular y eficiente.
+            // - loss: 'categoricalCrossentropy' es la función de pérdida adecuada para clasificación multiclase
+            //   cuando las etiquetas de salida están en formato one-hot.
+            // - metrics: ['accuracy'] para monitorear la precisión durante el entrenamiento.
+            model.compile({
+                optimizer: tf.train.adam(0.01), // Tasa de aprendizaje de 0.01
+                loss: 'categoricalCrossentropy',
+                metrics: ['accuracy']
+            });
+            document.getElementById('predictionOutput').innerText = 'Modelo creado y compilado. Listo para entrenar.';
+            console.log("createModel: Modelo creado y compilado.");
+        }
+
+        /**
+         * Entrena el modelo de red neuronal utilizando los datos de entrenamiento.
+         * Muestra el progreso del entrenamiento y la precisión en la interfaz.
+         */
+        async function trainModel() {
+            console.log("trainModel: Iniciando función trainModel.");
+            // Deshabilita los botones y actualiza el estado de la interfaz
+            document.getElementById('trainButton').disabled = true;
+            document.getElementById('predictByIndexButton').disabled = true;
+            document.getElementById('avance').innerText = 'Entrenando, progreso: 0/' + epochs + ' épocas completadas';
+            document.getElementById('predictionOutput').innerText = 'Iniciando entrenamiento...';
+            document.getElementById('accuracyOutput').innerText = ''; // Limpiar precisión anterior
+
+            const { inputs, outputs } = getNormalizedTrainingData(); // Obtener datos normalizados
+
+            const progressBar = document.getElementById('progressBar');
+            const accuracyOutput = document.getElementById('accuracyOutput');
+
+            try {
+                const history = await model.fit(inputs, outputs, {
+                    epochs: epochs, // Número de épocas definido por el usuario
+                    shuffle: true, // Mezcla los datos en cada época para un mejor entrenamiento
+                    callbacks: {
+                        // Callback que se ejecuta al final de cada época
+                        onEpochEnd: async (epoch, logs) => {
+                            progressBar.value = epoch + 1; // Actualiza el valor de la barra de progreso
+                            document.getElementById('avance').innerText = `Entrenando, progreso: ${epoch + 1}/${epochs} épocas completadas, pérdida: ${logs.loss.toFixed(4)}`;
+                            
+                            // Actualizar la última precisión válida
+                            if (!isNaN(logs.acc)) {
+                                lastEpochAccuracy = (logs.acc * 100).toFixed(2) + "%";
+                                accuracyOutput.innerText = `Precisión: ${lastEpochAccuracy}`;
+                            } else {
+                                accuracyOutput.innerText = `Precisión: N/A (Error)`;
+                            }
+
+                            // Detener el entrenamiento si la pérdida o precisión se vuelven NaN
+                            if (isNaN(logs.loss) || isNaN(logs.acc)) {
+                                console.error("trainModel: La pérdida o la precisión se volvieron NaN. Deteniendo el entrenamiento temprano.");
+                                document.getElementById('predictionOutput').innerText = `Error: El entrenamiento del modelo falló (pérdida/precisión NaN en época ${epoch + 1}). Intenta reducir la tasa de aprendizaje o el número de épocas.`;
+                                model.stopTraining(); // Detiene el entrenamiento
+                                return; // Salir del callback
+                            }
+                            await tf.nextFrame(); // Permite que la interfaz se actualice
+                        }
+                    }
+                });
+                console.log("trainModel: model.fit ha terminado. Historial completo:", history); // Log the full history object
+
+                let finalAccuracy = "N/A";
+                // Intentar obtener la precisión final del historial completo
+                if (history && history.history && history.history.acc && history.history.acc.length > 0) {
+                    finalAccuracy = (history.history.acc[history.history.acc.length - 1] * 100).toFixed(2) + "%";
+                } else if (lastEpochAccuracy !== "N/A") {
+                    // Si el historial completo no está disponible, usar la última precisión de época
+                    finalAccuracy = lastEpochAccuracy;
+                    console.warn("trainModel: Usando lastEpochAccuracy como precisión final, ya que history.history.acc no se pobló completamente.");
+                } else {
+                    console.warn("trainModel: No hay precisión final disponible del historial o de la última época.");
+                }
+                
+                document.getElementById('predictionOutput').innerText = 
+                    `Entrenamiento completado. Precisión final: ${finalAccuracy}`;
+                // Habilita los botones una vez que el entrenamiento ha terminado
+                document.getElementById('trainButton').disabled = false;
+                document.getElementById('predictByIndexButton').disabled = false;
+                document.getElementById('avance').innerText = 'Entrenamiento completado.';
+                console.log("trainModel: Botones habilitados y mensaje final actualizado.");
+
+            } catch (error) {
+                console.error("trainModel: Error durante el entrenamiento del modelo:", error);
+                document.getElementById('predictionOutput').innerText = `Error durante el entrenamiento: ${error.message}. Revisa la consola para más detalles.`;
+                document.getElementById('trainButton').disabled = false; // Habilitar botón de entrenamiento para reintentar
+                document.getElementById('predictByIndexButton').disabled = true; // Asegurarse de que el botón de predecir esté deshabilitado si falla el entrenamiento
+            }
+        }
+
+        /**
+         * Realiza una predicción para un dato de Iris específico usando su índice.
+         */
+        async function predictIrisByIndex() {
+            console.log("predictIrisByIndex: Iniciando predicción por índice.");
+            const index = parseInt(document.getElementById('predictIndexInput').value);
+
+            // Valida que el índice sea un número válido dentro del rango de los datos
+            if (isNaN(index) || index < 0 || index >= IRIS_DATA.length) {
+                document.getElementById('predictionOutput').innerText = `Por favor, ingrese un índice válido entre 0 y ${IRIS_DATA.length - 1}.`;
+                console.warn("predictIrisByIndex: Índice de predicción inválido:", index);
+                return;
+            }
+
+            const dataToPredict = IRIS_DATA[index];
+            const originalFeatures = dataToPredict.slice(0, 4); // Las primeras 4 columnas son las características
+            const realClassIndex = dataToPredict[4]; // La última columna es la clase real
+            const realClassName = IRIS_CLASSES[realClassIndex];
+
+            // Normalizar las características para la predicción
+            const normalizedFeatures = [
+                normalize(originalFeatures[0], minMaxValues.sepalLength.min, minMaxValues.sepalLength.max),
+                normalize(originalFeatures[1], minMaxValues.sepalWidth.min, minMaxValues.sepalWidth.max),
+                normalize(originalFeatures[2], minMaxValues.petalLength.min, minMaxValues.petalLength.max),
+                normalize(originalFeatures[3], minMaxValues.petalWidth.min, minMaxValues.petalWidth.max)
+            ];
+
+            // Crear un tensor 2D con las características normalizadas para la predicción
+            const inputTensor = tf.tensor2d([normalizedFeatures]);
+            // Realizar la predicción con el modelo
+            const prediction = model.predict(inputTensor);
+
+            // Obtener los datos de la predicción (probabilidades para cada clase)
+            prediction.data().then(data => {
+                console.log("predictIrisByIndex: Raw prediction data:", data); // LOGGING RAW DATA HERE
+                // 'data' contendrá las probabilidades para cada una de las 3 clases
+                const predictedClassIndex = data.indexOf(Math.max(...data)); // Obtiene el índice de la clase con mayor probabilidad
+                const predictedClassName = IRIS_CLASSES[predictedClassIndex];
+                
+                // Modificación para manejar números muy pequeños y evitar NaN usando toLocaleString
+                const probabilities = data.map(p => {
+                    if (isNaN(p)) {
+                        return 'NaN%'; // Si el valor es NaN, lo devolvemos tal cual
+                    }
+                    const percentage = p * 100;
+                    // toLocaleString es más robusto para formatear números, incluso muy pequeños.
+                    return percentage.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    }) + '%';
+                });
+
+                // Formatear y mostrar los resultados en la interfaz
+                const outputText = `
+                Predicción para el índice ${index}:
+                Características de entrada:
+                    Longitud Sépalo: ${originalFeatures[0]} cm
+                    Ancho Sépalo: ${originalFeatures[1]} cm
+                    Longitud Pétalo: ${originalFeatures[2]} cm
+                    Ancho Pétalo: ${originalFeatures[3]} cm
+
+                Especie Real: ${realClassName}
+
+                Probabilidades de las Clases:
+                    ${IRIS_CLASSES[0]}: ${probabilities[0]}
+                    ${IRIS_CLASSES[1]}: ${probabilities[1]}
+                    ${IRIS_CLASSES[2]}: ${probabilities[2]}
+
+                Especie Predicha: ${predictedClassName}
+                `;
+                document.getElementById('predictionOutput').innerText = outputText;
+                console.log("predictIrisByIndex: Predicción completada:", outputText);
+            });
+        }
+
+        /**
+         * Carga los datos de Iris en la tabla HTML para que el usuario pueda verlos.
+         */
+        function loadIrisDataToTable() {
+            console.log("loadIrisDataToTable: Cargando datos de Iris en la tabla.");
+            const tableBody = document.querySelector('#irisDataTable tbody');
+            tableBody.innerHTML = ''; // Limpia la tabla antes de cargar
+            IRIS_DATA.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${index}</td>
+                    <td>${row[0]}</td>
+                    <td>${row[1]}</td>
+                    <td>${row[2]}</td>
+                    <td>${row[3]}</td>
+                    <td>${IRIS_CLASSES[row[4]]}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+            console.log("loadIrisDataToTable: Datos de Iris cargados.");
+        }
+
+        // Asigna los event listeners a los botones
+        document.getElementById('trainButton').addEventListener('click', () => {
+            console.log("Evento 'trainButton' clickeado.");
+            // Obtiene el número de épocas del input. Asegurarse de que el input exista.
+            const epochsInput = document.getElementById('epochsInput');
+            if (epochsInput) {
+                epochs = parseInt(epochsInput.value); 
+            } else {
+                console.error("Error: El elemento 'epochsInput' no fue encontrado.");
+                document.getElementById('predictionOutput').innerText = "Error: No se encontró el campo de entrada para las épocas. No se puede iniciar el entrenamiento.";
+                return; // Detener la ejecución si el elemento no se encuentra
+            }
+            
+            document.getElementById('progressBar').max = epochs; // Sincroniza el máximo de la barra de progreso
+            document.getElementById('progressBar').value = 0; // Reinicia la barra de progreso
+            trainModel(); // Inicia el entrenamiento
+        });
+
+        document.getElementById('predictByIndexButton').addEventListener('click', predictIrisByIndex);
+
+        // Inicializa el modelo y carga los datos en la tabla cuando la ventana carga completamente
+        window.onload = function() {
+            console.log("window.onload: Página cargada, iniciando configuración.");
+            createModel(); 
+            loadIrisDataToTable();
+            // Asegura que el input de índice tenga el valor máximo correcto
+            document.getElementById('predictIndexInput').max = IRIS_DATA.length - 1;
+            console.log("window.onload: Configuración inicial completada.");
+        };
+    </script>
+</body>
+</html>
