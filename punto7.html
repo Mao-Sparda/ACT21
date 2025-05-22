@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Predicción de Enfermedades Cardíacas (Simple)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        /* Estilos mínimos para legibilidad */
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+        div {
+            margin-bottom: 10px;
+        }
+        input[type="number"], button {
+            padding: 8px;
+            margin-top: 5px;
+            display: block;
+            width: 200px; /* Ancho fijo para inputs y botones */
+        }
+        button {
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #output {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 100px;
+            white-space: pre-wrap; /* Mantiene los saltos de línea */
+            background-color: #f9f9f9;
+        }
+        #trainingProgress {
+            margin-top: 15px;
+            padding: 10px;
+            border: 1px dashed #cccccc;
+            background-color: #e9e9e9;
+        }
+        progress {
+            width: 100%;
+            height: 20px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Predicción de Enfermedades Cardíacas</h1>
+    <p>Este modelo predice la probabilidad de enfermedad cardíaca.</p>
+
+    <h2>Entrenamiento del Modelo</h2>
+    <div>
+        <label for="epochsInput">Número de Épocas:</label>
+        <input type="number" id="epochsInput" value="500" min="10">
+    </div>
+    <button id="trainButton">Entrenar Modelo</button>
+
+    <div id="trainingProgress" style="display:none;">
+        <label id="progressLabel">Entrenando la red...</label>
+        <progress id="progressBar" max="500" value="0"></progress>
+        <p id="accuracyOutput"></p>
+    </div>
+
+    <h2>Realizar Predicción</h2>
+    <div>
+        <label for="ageInput">Edad (años):</label>
+        <input type="number" id="ageInput" value="50" min="1">
+    </div>
+    <div>
+        <label for="cholesterolInput">Colesterol (mg/dL):</label>
+        <input type="number" id="cholesterolInput" value="200" min="50">
+    </div>
+    <div>
+        <label for="maxHeartRateInput">Frecuencia Cardíaca Máxima:</label>
+        <input type="number" id="maxHeartRateInput" value="150" min="50">
+    </div>
+    <button id="predictButton" disabled>Predecir</button>
+
+    <h2>Resultados</h2>
+    <div id="output">
+        Esperando el entrenamiento del modelo...
+    </div>
+
+    <script>
+        // Variables globales para el modelo y los datos
+        let model;
+        let epochs = 500;
+
+        // Datos de entrenamiento hipotéticos (Edad, Colesterol, Frecuencia Cardíaca Máxima, Enfermedad Cardíaca)
+        // Enfermedad Cardíaca: 0 = No, 1 = Sí
+        // Estos datos son solo para demostración y no deben usarse para diagnósticos reales.
+        const trainingData = [
+            // No Heart Disease (0)
+            [30, 150, 180, 0],
+            [45, 180, 160, 0],
+            [55, 190, 140, 0],
+            [38, 165, 175, 0],
+            [60, 210, 130, 0],
+            [42, 170, 165, 0],
+            [50, 195, 155, 0],
+            [35, 155, 170, 0],
+            [62, 205, 125, 0],
+            [48, 185, 150, 0],
+            // Heart Disease (1)
+            [65, 250, 120, 1],
+            [70, 280, 110, 1],
+            [58, 230, 135, 1],
+            [60, 240, 125, 1],
+            [52, 220, 145, 1],
+            [68, 260, 115, 1],
+            [72, 290, 100, 1],
+            [59, 235, 130, 1],
+            [63, 245, 120, 1],
+            [55, 225, 140, 1]
+        ];
+
+        // Normalización de los datos (muy importante para el entrenamiento de redes neuronales)
+        // En un escenario real, calcularías min/max de un dataset más grande.
+        // Para este ejemplo, usaremos valores fijos basados en el rango de los datos hipotéticos.
+        const minAge = 30, maxAge = 72;
+        const minCholesterol = 150, maxCholesterol = 290;
+        const minMaxHeartRate = 100, maxMaxHeartRate = 180;
+
+        /**
+         * Normaliza un valor a un rango de 0 a 1.
+         * @param {number} value - El valor a normalizar.
+         * @param {number} min - El valor mínimo del rango original.
+         * @param {number} max - El valor máximo del rango original.
+         * @returns {number} El valor normalizado.
+         */
+        function normalize(value, min, max) {
+            return (value - min) / (max - min);
+        }
+
+        /**
+         * Prepara los datos de entrenamiento normalizados para TensorFlow.js.
+         * Separa las entradas de las salidas y las convierte en tensores.
+         * @returns {{inputs: tf.Tensor, outputs: tf.Tensor}} Los tensores de entrada y salida.
+         */
+        function getNormalizedTrainingData() {
+            const inputs = trainingData.map(d => [
+                normalize(d[0], minAge, maxAge),
+                normalize(d[1], minCholesterol, maxCholesterol),
+                normalize(d[2], minMaxHeartRate, maxMaxHeartRate)
+            ]);
+            const outputs = trainingData.map(d => [d[3]]); // La última columna es la etiqueta (0 o 1)
+            return { inputs: tf.tensor2d(inputs), outputs: tf.tensor2d(outputs) };
+        }
+
+        /**
+         * Crea y compila el modelo de red neuronal.
+         * Define la arquitectura del modelo (capas, unidades, funciones de activación).
+         */
+        function createModel() {
+            console.log("Creando y compilando el modelo...");
+            model = tf.sequential();
+            // Capa de entrada: 3 características de entrada (edad, colesterol, frecuencia cardíaca máxima)
+            model.add(tf.layers.dense({ inputShape: [3], units: 16, activation: 'relu' }));
+            // Capa oculta: 8 neuronas
+            model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+            // Capa de salida: 1 neurona con activación sigmoide para clasificación binaria (probabilidad entre 0 y 1)
+            model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+
+            // Compilar el modelo:
+            // - optimizer: 'adam' es un optimizador eficiente.
+            // - loss: 'binaryCrossentropy' es la función de pérdida estándar para clasificación binaria.
+            // - metrics: ['accuracy'] para monitorear la precisión durante el entrenamiento.
+            model.compile({
+                optimizer: tf.train.adam(0.01), // Tasa de aprendizaje de 0.01
+                loss: 'binaryCrossentropy',
+                metrics: ['accuracy']
+            });
+            document.getElementById('output').innerText = 'Modelo creado y compilado. Listo para entrenar.';
+            console.log("Modelo creado y compilado.");
+        }
+
+        /**
+         * Entrena el modelo de red neuronal utilizando los datos de entrenamiento.
+         * Muestra el progreso del entrenamiento y la precisión.
+         */
+        async function trainModel() {
+            console.log("Iniciando función trainModel...");
+            // Deshabilita los botones y muestra la barra de progreso durante el entrenamiento
+            document.getElementById('trainButton').disabled = true;
+            document.getElementById('predictButton').disabled = true;
+            document.getElementById('trainingProgress').style.display = 'block'; // Muestra el div de progreso
+            document.getElementById('output').innerText = 'Iniciando entrenamiento...';
+
+            try {
+                const { inputs, outputs } = getNormalizedTrainingData();
+                const progressBar = document.getElementById('progressBar');
+                const progressLabel = document.getElementById('progressLabel');
+                const accuracyOutput = document.getElementById('accuracyOutput');
+
+                // Inicia el entrenamiento del modelo
+                await model.fit(inputs, outputs, {
+                    epochs: epochs, // Número de épocas definido por el usuario
+                    shuffle: true, // Mezcla los datos en cada época para un mejor entrenamiento
+                    callbacks: {
+                        // Callback que se ejecuta al final de cada época
+                        onEpochEnd: (epoch, logs) => {
+                            progressBar.value = epoch + 1; // Actualiza el valor de la barra de progreso
+                            progressLabel.innerText = `Entrenando la red: Época ${epoch + 1}/${epochs}`;
+                            accuracyOutput.innerText = `Precisión: ${(logs.acc * 100).toFixed(2)}%`; // Muestra la precisión
+                            // console.log(`Epoch ${epoch + 1}: Loss = ${logs.loss.toFixed(4)}, Accuracy = ${logs.acc.toFixed(4)}`); // Para depuración
+                        },
+                        // Callback que se ejecuta al final de todo el entrenamiento
+                        onTrainEnd: (logs) => {
+                            console.log("Entrenamiento completado en onTrainEnd. Logs:", logs); // Log the full logs object
+                            let finalAccuracy = "N/A";
+                            if (logs && logs.history && logs.history.acc && logs.history.acc.length > 0) {
+                                finalAccuracy = (logs.history.acc[logs.history.acc.length - 1] * 100).toFixed(2) + "%";
+                            } else {
+                                console.warn("logs.history.acc no está disponible o está vacío en onTrainEnd.");
+                            }
+
+                            document.getElementById('output').innerText = 
+                                `Entrenamiento completado. Precisión final: ${finalAccuracy}`;
+                            // Habilita los botones una vez que el entrenamiento ha terminado
+                            document.getElementById('trainButton').disabled = false;
+                            document.getElementById('predictButton').disabled = false;
+                            progressLabel.innerText = 'Entrenamiento completado.';
+                        }
+                    }
+                });
+                console.log("model.fit ha terminado.");
+            } catch (error) {
+                console.error("Error durante el entrenamiento del modelo:", error);
+                document.getElementById('output').innerText = `Error durante el entrenamiento: ${error.message}. Revisa la consola para más detalles.`;
+                document.getElementById('trainButton').disabled = false; // Habilitar botón de entrenamiento para reintentar
+            }
+        }
+
+        /**
+         * Realiza una predicción de enfermedad cardíaca basada en las entradas del usuario.
+         * Normaliza las entradas y utiliza el modelo entrenado para obtener la probabilidad.
+         */
+        async function predictHeartDisease() {
+            console.log("Iniciando predicción...");
+            // Obtiene los valores de entrada del usuario
+            const age = parseFloat(document.getElementById('ageInput').value);
+            const cholesterol = parseFloat(document.getElementById('cholesterolInput').value);
+            const maxHeartRate = parseFloat(document.getElementById('maxHeartRateInput').value);
+
+            // Valida que las entradas sean números válidos
+            if (isNaN(age) || isNaN(cholesterol) || isNaN(maxHeartRate)) {
+                document.getElementById('output').innerText = 'Por favor, ingrese valores numéricos válidos para todas las entradas.';
+                console.warn("Entradas inválidas para la predicción.");
+                return;
+            }
+
+            // Normaliza los valores de entrada del usuario usando los mismos rangos que en el entrenamiento
+            const normalizedAge = normalize(age, minAge, maxAge);
+            const normalizedCholesterol = normalize(cholesterol, minCholesterol, maxCholesterol);
+            const normalizedMaxHeartRate = normalize(maxHeartRate, minMaxHeartRate, maxMaxHeartRate);
+
+            // Crea un tensor 2D con las entradas normalizadas para la predicción
+            const inputTensor = tf.tensor2d([[normalizedAge, normalizedCholesterol, normalizedMaxHeartRate]]);
+            // Realiza la predicción con el modelo
+            const prediction = model.predict(inputTensor);
+
+            // Obtiene los datos de la predicción (probabilidad)
+            prediction.data().then(data => {
+                const probability = data[0]; // La probabilidad de enfermedad cardíaca
+                // Determina el resultado final (Sí/No) basado en un umbral de 0.5
+                const result = probability > 0.5 ? 'Sí' : 'No';
+                
+                // Formatea y muestra los resultados en la interfaz
+                const outputText = `
+                Predicción para:
+                Edad: ${age} años
+                Colesterol: ${cholesterol} mg/dL
+                Frecuencia Cardíaca Máxima: ${maxHeartRate} bpm
+
+                Probabilidad de Enfermedad Cardíaca: ${(probability * 100).toFixed(2)}%
+                Resultado Predicho: ${result}
+                `;
+                document.getElementById('output').innerText = outputText;
+                console.log("Predicción completada:", outputText);
+            });
+        }
+
+        // Asigna los event listeners a los botones
+        document.getElementById('trainButton').addEventListener('click', () => {
+            epochs = parseInt(document.getElementById('epochsInput').value); // Obtiene el número de épocas del input
+            document.getElementById('progressBar').max = epochs; // Sincroniza el máximo de la barra de progreso
+            document.getElementById('progressBar').value = 0; // Reinicia la barra de progreso
+            trainModel(); // Inicia el entrenamiento
+        });
+
+        document.getElementById('predictButton').addEventListener('click', predictHeartDisease);
+
+        // Inicializa el modelo cuando la ventana carga completamente
+        window.onload = function() {
+            createModel();
+        };
+    </script>
+</body>
+</html>
